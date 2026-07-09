@@ -1081,9 +1081,21 @@ class AIEngine:
             carb_history = [carb_mensuel] * 12
 
         forecast    = self._predict_forecast(carb_history, model_key="nhits", horizon=3)
-        hist_mean   = float(np.mean(carb_history)) if carb_history else 1.0
+        hist_mean   = float(np.mean(carb_history)) if carb_history else 0.0
         fc_mean     = float(np.mean(forecast))     if forecast     else 0.0
-        forecast_ecart = abs(fc_mean - hist_mean) / max(hist_mean, 1.0)  # fraction
+
+        # ── Calcul écart N-HiTS corrigé ──────────────────────────────────
+        # Si l'historique est nul ou très faible (<5L/mois), le véhicule
+        # n'a pas de données carburant en BD → l'écart n'est pas significatif.
+        # On plafonne à 0 pour éviter +4000% qui fausse la criticité.
+        _CARB_MIN_MENSUEL = 5.0   # seuil minimum réaliste (L/mois)
+        if hist_mean < _CARB_MIN_MENSUEL:
+            # Pas assez de données historiques — écart non calculable
+            forecast_ecart = 0.0
+        else:
+            raw_ecart = abs(fc_mean - hist_mean) / hist_mean
+            # Plafonner à 100% (1.0) — un écart >100% n'est pas crédible
+            forecast_ecart = min(raw_ecart, 1.0)
 
         # 7. PPO — action recommandée
         action_idx, action_conf, action_probs = self._predict_ppo(vehicle_data)
